@@ -14,14 +14,27 @@ and Digistump LLC (digistump.com)
 #include <avr/pgmspace.h>
 #include <stdint.h>
 #include <util/delay.h>
-
+#ifdef __cplusplus
+extern "C" {
+#endif
+const WebUSBURL *urls;
+uint8_t numUrls;
+uint8_t landingPage;
+uint8_t pluggedInterface;
+const uint8_t *allowedOrigins;
+#ifdef __cplusplus
+} // extern "C"
+#endif
 uchar sendEmptyFrame;
 static uchar intr3Status; /* used to control interrupt endpoint transmissions */
 
 DigiWebUSBDevice::DigiWebUSBDevice(const WebUSBURL *urls, uint8_t numUrls,
-                                   uint8_t landingPage,
+                                   uint8_t _landingPage,
                                    const uint8_t *allowedOrigins,
-                                   uint8_t numAllowedOrigins) {}
+                                   uint8_t numAllowedOrigins) {
+  landingPage = 0;
+  pluggedInterface = 0;
+}
 
 void DigiWebUSBDevice::delay(long milli) {
   unsigned long last = millis();
@@ -166,101 +179,200 @@ enum {
   SET_CONTROL_LINE_STATE,
   SEND_BREAK
 };
+const uchar *pmResponsePtr;
+uchar pmResponseBytesRemaining;
+#define USB_BOS_DESCRIPTOR_TYPE (15)
+#define MS_OS_20_DESCRIPTOR_LENGTH (0x1e)
+#define WEBUSB_REQUEST_GET_ALLOWED_ORIGINS (0x01)
+#define WEBUSB_REQUEST_GET_URL (0x02)
+const uchar BOS_DESCRIPTOR[] PROGMEM = {
+    // BOS descriptor header
+    0x05, 0x0F, 0x39, 0x00, 0x02,
 
-static const PROGMEM char configDescrCDC[] =
-    {
-        /* USB configuration descriptor */
-        9, /* sizeof(usbDescrConfig): length of descriptor in bytes */
-        USBDESCR_CONFIG, /* descriptor type */
-        67,
-        0, /* total length of data returned (including inlined descriptors) */
-        2, /* number of interfaces in this configuration */
-        1, /* index of this configuration */
-        0, /* configuration name string index */
+    // WebUSB Platform Capability descriptor
+    0x18, // Descriptor size (24 bytes)
+    0x10, // Descriptor type (Device Capability)
+    0x05, // Capability type (Platform)
+    0x00, // Reserved
+
+    // WebUSB Platform Capability ID (3408b638-09a9-47a0-8bfd-a0768815b665)
+    0x38, 0xB6, 0x08, 0x34, 0xA9, 0x09, 0xA0, 0x47, 0x8B, 0xFD, 0xA0, 0x76,
+    0x88, 0x15, 0xB6, 0x65,
+
+    0x00, 0x01,        // WebUSB version 1.0
+    WL_REQUEST_WEBUSB, // Vendor-assigned WebUSB request code
+    0x00,              // Landing page: https://sowbug.github.io/webusb
+
+    // Microsoft OS 2.0 Platform Capability Descriptor
+    // Thanks http://janaxelson.com/files/ms_os_20_descriptors.c
+    0x1C, // Descriptor size (28 bytes)
+    0x10, // Descriptor type (Device Capability)
+    0x05, // Capability type (Platform)
+    0x00, // Reserved
+
+    // MS OS 2.0 Platform Capability ID (D8DD60DF-4589-4CC7-9CD2-659D9E648A9F)
+    0xDF, 0x60, 0xDD, 0xD8, 0x89, 0x45, 0xC7, 0x4C, 0x9C, 0xD2, 0x65, 0x9D,
+    0x9E, 0x64, 0x8A, 0x9F,
+
+    0x00, 0x00, 0x03, 0x06, // Windows version (8.1) (0x06030000)
+    MS_OS_20_DESCRIPTOR_LENGTH, 0x00,
+    WL_REQUEST_WINUSB, // Vendor-assigned bMS_VendorCode
+    0x00               // Doesn’t support alternate enumeration
+};
+
+
+// Microsoft OS 2.0 Descriptor Set
+//
+// See https://goo.gl/4T73ef for discussion about bConfigurationValue:
+//
+// "It looks like we'll need to update the MSOS 2.0 Descriptor docs to
+// match the implementation in USBCCGP. The bConfigurationValue in the
+// configuration subset header should actually just be an index value,
+// not the configuration value. Specifically it's the index value
+// passed to GET_DESCRIPTOR to retrieve the configuration descriptor.
+// Try changing the value to 0 and see if that resolves the issue.
+// Sorry for the confusion."
+#define WINUSB_REQUEST_DESCRIPTOR (0x07)
+const uchar MS_OS_20_DESCRIPTOR_SET[MS_OS_20_DESCRIPTOR_LENGTH] PROGMEM = {
+    // Microsoft OS 2.0 descriptor set header (table 10)
+    0x0A, 0x00,                       // Descriptor size (10 bytes)
+    0x00, 0x00,                       // MS OS 2.0 descriptor set header
+    0x00, 0x00, 0x03, 0x06,           // Windows version (8.1) (0x06030000)
+    MS_OS_20_DESCRIPTOR_LENGTH, 0x00, // Size, MS OS 2.0 descriptor set
+
+    // Microsoft OS 2.0 compatible ID descriptor (table 13)
+    0x14, 0x00, // wLength
+    0x03, 0x00, // MS_OS_20_FEATURE_COMPATIBLE_ID
+    'W', 'I', 'N', 'U', 'S', 'B', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00,
+};
+static const PROGMEM char configDescrCDC[] = {
+    /* USB configuration descriptor */
+    9,               /* sizeof(usbDescrConfig): length of descriptor in bytes */
+    USBDESCR_CONFIG, /* descriptor type */
+    67, 0, /* total length of data returned (including inlined descriptors) */
+    2,     /* number of interfaces in this configuration */
+    1,     /* index of this configuration */
+    0,     /* configuration name string index */
 #if USB_CFG_IS_SELF_POWERED
-        (1 << 7) | USBATTR_SELFPOWER, /* attributes */
+    (1 << 7) | USBATTR_SELFPOWER, /* attributes */
 #else
-        (1 << 7), /* attributes */
+    (1 << 7), /* attributes */
 #endif
-        USB_CFG_MAX_BUS_POWER / 2, /* max USB current in 2mA units */
+    USB_CFG_MAX_BUS_POWER / 2, /* max USB current in 2mA units */
 
-        /* interface descriptor follows inline: */
-        9, /* sizeof(usbDescrInterface): length of descriptor in bytes */
-        USBDESCR_INTERFACE,           /* descriptor type */
-        0,                            /* index of this interface */
-        0,                            /* alternate setting for this interface */
-        USB_CFG_HAVE_INTRIN_ENDPOINT, /* endpoints excl 0: number of endpoint
-                                         descriptors to follow */
-        USB_CFG_INTERFACE_CLASS, USB_CFG_INTERFACE_SUBCLASS,
-        USB_CFG_INTERFACE_PROTOCOL, 0, /* string index for interface */
+    /* interface descriptor follows inline: */
+    9, /* sizeof(usbDescrInterface): length of descriptor in bytes */
+    USBDESCR_INTERFACE,           /* descriptor type */
+    0,                            /* index of this interface */
+    0,                            /* alternate setting for this interface */
+    USB_CFG_HAVE_INTRIN_ENDPOINT, /* endpoints excl 0: number of endpoint
+                                     descriptors to follow */
+    USB_CFG_INTERFACE_CLASS, USB_CFG_INTERFACE_SUBCLASS,
+    USB_CFG_INTERFACE_PROTOCOL, 0, /* string index for interface */
 
-        /* CDC Class-Specific descriptor */
-        5,    /* sizeof(usbDescrCDC_HeaderFn): length of descriptor in bytes */
-        0x24, /* descriptor type */
-        0,    /* header functional descriptor */
-        0x10, 0x01,
+    /* CDC Class-Specific descriptor */
+    5,    /* sizeof(usbDescrCDC_HeaderFn): length of descriptor in bytes */
+    0x24, /* descriptor type */
+    0,    /* header functional descriptor */
+    0x10, 0x01,
 
-        4,    /* sizeof(usbDescrCDC_AcmFn): length of descriptor in bytes    */
-        0x24, /* descriptor type */
-        2,    /* abstract control management functional descriptor */
-        0x02, /* SET_LINE_CODING, GET_LINE_CODING, SET_CONTROL_LINE_STATE    */
+    4,    /* sizeof(usbDescrCDC_AcmFn): length of descriptor in bytes    */
+    0x24, /* descriptor type */
+    2,    /* abstract control management functional descriptor */
+    0x02, /* SET_LINE_CODING, GET_LINE_CODING, SET_CONTROL_LINE_STATE    */
 
-        5,    /* sizeof(usbDescrCDC_UnionFn): length of descriptor in bytes  */
-        0x24, /* descriptor type */
-        6,    /* union functional descriptor */
-        0,    /* CDC_COMM_INTF_ID */
-        1,    /* CDC_DATA_INTF_ID */
+    5,    /* sizeof(usbDescrCDC_UnionFn): length of descriptor in bytes  */
+    0x24, /* descriptor type */
+    6,    /* union functional descriptor */
+    0,    /* CDC_COMM_INTF_ID */
+    1,    /* CDC_DATA_INTF_ID */
 
-        5,    /* sizeof(usbDescrCDC_CallMgtFn): length of descriptor in bytes */
-        0x24, /* descriptor type */
-        1,    /* call management functional descriptor */
-        3,    /* allow management on data interface, handles call management by
-                 itself */
-        1,    /* CDC_DATA_INTF_ID */
+    5,    /* sizeof(usbDescrCDC_CallMgtFn): length of descriptor in bytes */
+    0x24, /* descriptor type */
+    1,    /* call management functional descriptor */
+    3,    /* allow management on data interface, handles call management by
+             itself */
+    1,    /* CDC_DATA_INTF_ID */
 
-        /* Endpoint Descriptor */
-        7,                          /* sizeof(usbDescrEndpoint) */
-        USBDESCR_ENDPOINT,          /* descriptor type = endpoint */
-        0x80 | USB_CFG_EP3_NUMBER,  /* IN endpoint number 3 */
-        0x03,                       /* attrib: Interrupt endpoint */
-        8, 0,                       /* maximum packet size */
-        USB_CFG_INTR_POLL_INTERVAL, /* in ms */
+    /* Endpoint Descriptor */
+    7,                          /* sizeof(usbDescrEndpoint) */
+    USBDESCR_ENDPOINT,          /* descriptor type = endpoint */
+    0x80 | USB_CFG_EP3_NUMBER,  /* IN endpoint number 3 */
+    0x03,                       /* attrib: Interrupt endpoint */
+    8, 0,                       /* maximum packet size */
+    USB_CFG_INTR_POLL_INTERVAL, /* in ms */
 
-        /* Interface Descriptor  */
-        9, /* sizeof(usbDescrInterface): length of descriptor in bytes */
-        USBDESCR_INTERFACE, /* descriptor type */
-        1,                  /* index of this interface */
-        0,                  /* alternate setting for this interface */
-        2,    /* endpoints excl 0: number of endpoint descriptors to follow */
-        0x0A, /* Data Interface Class Codes */
-        0, 0, /* Data Interface Class Protocol Codes */
-        0,    /* string index for interface */
+    /* Interface Descriptor  */
+    9, /* sizeof(usbDescrInterface): length of descriptor in bytes */
+    USBDESCR_INTERFACE, /* descriptor type */
+    1,                  /* index of this interface */
+    0,                  /* alternate setting for this interface */
+    2,    /* endpoints excl 0: number of endpoint descriptors to follow */
+    0x0A, /* Data Interface Class Codes */
+    0, 0, /* Data Interface Class Protocol Codes */
+    0,    /* string index for interface */
 
-        /* Endpoint Descriptor */
-        7,                       /* sizeof(usbDescrEndpoint) */
-        USBDESCR_ENDPOINT,       /* descriptor type = endpoint */
-        0x01,                    /* OUT endpoint number 1 */
-        0x02,                    /* attrib: Bulk endpoint */
-        HW_CDC_BULK_OUT_SIZE, 0, /* maximum packet size */
-        0,                       /* in ms */
+    /* Endpoint Descriptor */
+    7,                       /* sizeof(usbDescrEndpoint) */
+    USBDESCR_ENDPOINT,       /* descriptor type = endpoint */
+    0x01,                    /* OUT endpoint number 1 */
+    0x02,                    /* attrib: Bulk endpoint */
+    HW_CDC_BULK_OUT_SIZE, 0, /* maximum packet size */
+    0,                       /* in ms */
 
-        /* Endpoint Descriptor */
-        7,                      /* sizeof(usbDescrEndpoint) */
-        USBDESCR_ENDPOINT,      /* descriptor type = endpoint */
-        0x81,                   /* IN endpoint number 1 */
-        0x02,                   /* attrib: Bulk endpoint */
-        HW_CDC_BULK_IN_SIZE, 0, /* maximum packet size */
-        0,                      /* in ms */
+    /* Endpoint Descriptor */
+    7,                      /* sizeof(usbDescrEndpoint) */
+    USBDESCR_ENDPOINT,      /* descriptor type = endpoint */
+    0x81,                   /* IN endpoint number 1 */
+    0x02,                   /* attrib: Bulk endpoint */
+    HW_CDC_BULK_IN_SIZE, 0, /* maximum packet size */
+    0,                      /* in ms */
 };
 
 uchar usbFunctionDescriptor(usbRequest_t *rq) {
-  if (rq->wValue.bytes[1] == USBDESCR_DEVICE) {
+  switch (rq->wValue.bytes[1]) {
+  case USBDESCR_DEVICE:
     usbMsgPtr = (uchar *)usbDescriptorDevice;
     return usbDescriptorDevice[0];
-  } else { /* must be config descriptor */
+
+  case USB_BOS_DESCRIPTOR_TYPE:
+    usbMsgPtr = (uchar *)(BOS_DESCRIPTOR);
+    return sizeof(BOS_DESCRIPTOR);
+    // if (rq->wValue.bytes[0] == 0 && rq->wIndex.word == 0) {
+    /* usbFunctionWriteOut((uchar *)&BOS_DESCRIPTOR_PREFIX,
+                         sizeof(BOS_DESCRIPTOR_PREFIX));
+     usbFunctionWriteOut((uchar *)&landingPage, 1);
+     usbFunctionWriteOut((uchar *)&BOS_DESCRIPTOR_SUFFIX,
+                         sizeof(BOS_DESCRIPTOR_SUFFIX));*/
+
+    //}
+    break;
+  default:
     usbMsgPtr = (uchar *)configDescrCDC;
     return sizeof(configDescrCDC);
   }
+}
+uint8_t GetDescriptorStart(uint8_t index, const uint8_t **pmResponsePtr,
+                           uint8_t *pmResponseBytesRemaining) {
+  //*pmResponsePtr = (const uint8_t *)EEPROM_WEBUSB_URLS_START;
+  do {
+    //*pmResponseBytesRemaining = eeprom_read_byte(*pmResponsePtr);
+
+    // Found item. Return it.
+    if (index-- == 0) {
+      return true;
+    }
+
+    // Exceeded number of items in sequence. Return last one but indicate
+    // failure.
+    if (*pmResponseBytesRemaining == 0) {
+      return false;
+    }
+
+    *pmResponsePtr += *pmResponseBytesRemaining;
+
+  } while (true);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -291,6 +403,28 @@ uchar usbFunctionSetup(uchar data[8]) {
       sendEmptyFrame = 1;
   }
 
+  switch (rq->bRequest) {
+  case WL_REQUEST_WEBUSB:
+    switch (rq->wIndex.word) {
+    case WEBUSB_REQUEST_GET_ALLOWED_ORIGINS:
+      // GetDescriptorStart(0, &pmResponsePtr, &pmResponseBytesRemaining);
+      return USB_NO_MSG;
+    case WEBUSB_REQUEST_GET_URL:
+      //  if (GetDescriptorStart(rq->wValue.word, &pmResponsePtr,
+      //                        &pmResponseBytesRemaining)) {
+      return USB_NO_MSG;
+    }
+    break;
+  case WL_REQUEST_WINUSB: {
+    switch (rq->wIndex.word) {
+    case WINUSB_REQUEST_DESCRIPTOR:
+      pmResponsePtr = MS_OS_20_DESCRIPTOR_SET;
+      pmResponseBytesRemaining = sizeof(MS_OS_20_DESCRIPTOR_SET);
+      return USB_NO_MSG;
+    }
+    break;
+  }
+  }
   return 0;
 }
 
@@ -298,15 +432,15 @@ uchar usbFunctionSetup(uchar data[8]) {
 /* usbFunctionRead                                                          */
 /*---------------------------------------------------------------------------*/
 uchar usbFunctionRead(uchar *data, uchar len) {
-  // data[0] = 0;
-  // data[1] = 0;
-  // data[2] = 0;
-  // data[3] = 0;
-  // data[4] = 0;
-  // data[5] = 0;
-  // data[6] = 8;
+  if (len > pmResponseBytesRemaining) {
+    len = pmResponseBytesRemaining;
+  }
 
-  return 7;
+  memcpy_P(data, pmResponsePtr, len);
+
+  pmResponsePtr += len;
+  pmResponseBytesRemaining -= len;
+  return len;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -336,4 +470,3 @@ void usbFunctionWriteOut(uchar *data, uchar len) {
 #ifdef __cplusplus
 } // extern "C"
 #endif
-
