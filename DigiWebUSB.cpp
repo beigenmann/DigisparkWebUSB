@@ -11,8 +11,8 @@ and Digistump LLC (digistump.com)
 #include "eeprom.h"
 #include "requests.h"
 #include <Arduino.h>
-#include <avr/interrupt.h>
 #include <avr/eeprom.h>
+#include <avr/interrupt.h>
 #include <avr/pgmspace.h>
 #include <stdint.h>
 #include <util/delay.h>
@@ -28,6 +28,7 @@ uint8_t landingPage;
 uint8_t pluggedInterface;
 const uint8_t *allowedOrigins;
 uchar pmResponseIsEEPROM;
+uchar _deb = 0;
 
 #ifdef __cplusplus
 } // extern "C"
@@ -138,6 +139,9 @@ void DigiWebUSBDevice::usbBegin() {
 
   sei();
 }
+ uchar DigiWebUSBDevice::deb(){
+   return _deb;
+ }
 
 void DigiWebUSBDevice::usbPollWrapper() {
   usbPoll();
@@ -186,8 +190,8 @@ enum {
   SET_CONTROL_LINE_STATE,
   SEND_BREAK
 };
-const uchar *pmResponsePtr;
-uchar pmResponseBytesRemaining;
+const uchar *pmResponsePtr = NULL;
+uchar pmResponseBytesRemaining = 0;
 #define USB_BOS_DESCRIPTOR_TYPE (15)
 #define MS_OS_20_DESCRIPTOR_LENGTH (0x1e)
 #define WEBUSB_REQUEST_GET_ALLOWED_ORIGINS (0x01)
@@ -208,7 +212,7 @@ const uchar BOS_DESCRIPTOR[] PROGMEM = {
 
     0x00, 0x01,        // WebUSB version 1.0
     WL_REQUEST_WEBUSB, // Vendor-assigned WebUSB request code
-    0x00,              // Landing page: https://sowbug.github.io/webusb
+    0x01,              // Landing page: https://sowbug.github.io/webusb
 
     // Microsoft OS 2.0 Platform Capability Descriptor
     // Thanks http://janaxelson.com/files/ms_os_20_descriptors.c
@@ -252,6 +256,27 @@ const uchar MS_OS_20_DESCRIPTOR_SET[MS_OS_20_DESCRIPTOR_LENGTH] PROGMEM = {
     'W', 'I', 'N', 'U', 'S', 'B', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00,
 };
+/*
+const PROGMEM char usbDescriptorDevice[] = {  
+ // USB device descriptor
+  0x12,  // sizeof(usbDescriptorDevice): length of descriptor in bytes
+  USBDESCR_DEVICE,        // descriptor type
+  0x10, 0x02,             // USB version supported == 2.1
+  USB_CFG_DEVICE_CLASS,
+  USB_CFG_DEVICE_SUBCLASS,
+  0,                      // protocol
+  8,                      // max packet size
+  // the following two casts affect the first byte of the constant only, but
+  // that's sufficient to avoid a warning with the default values.
+  (char)USB_CFG_VENDOR_ID,
+  (char)USB_CFG_DEVICE_ID,
+  USB_CFG_DEVICE_VERSION,
+  1,  // manufacturer string index
+  2,  // product string index
+  3,  // serial number string index
+  1,  // number of configurations
+};
+*/
 static const PROGMEM char configDescrCDC[] = {
     /* USB configuration descriptor */
     9,               /* sizeof(usbDescrConfig): length of descriptor in bytes */
@@ -336,8 +361,32 @@ static const PROGMEM char configDescrCDC[] = {
     0,                      /* in ms */
 };
 
+const char _usbDescriptorDevice[] PROGMEM = {  // USB device descriptor
+  0x12,  // sizeof(usbDescriptorDevice): length of descriptor in bytes
+  USBDESCR_DEVICE,        // descriptor type
+  0x10, 0x02,             // USB version supported == 2.1
+  USB_CFG_DEVICE_CLASS,
+  USB_CFG_DEVICE_SUBCLASS,
+  0,                      // protocol
+  8,                      // max packet size
+  // the following two casts affect the first byte of the constant only, but
+  // that's sufficient to avoid a warning with the default values.
+  (char)USB_CFG_VENDOR_ID,
+  (char)USB_CFG_DEVICE_ID,
+  USB_CFG_DEVICE_VERSION,
+  1,  // manufacturer string index
+  2,  // product string index
+  3,  // serial number string index
+  1,  // number of configurations
+};
+
+
 uchar usbFunctionDescriptor(usbRequest_t *rq) {
   switch (rq->wValue.bytes[1]) {
+    _deb = rq->wValue.bytes[1];
+   case USB_BOS_DESCRIPTOR_TYPE:
+    usbMsgPtr = (uchar *)(BOS_DESCRIPTOR);
+    return sizeof(BOS_DESCRIPTOR);
   case USBDESCR_STRING:
     switch (rq->wValue.bytes[0]) {
     case 3:
@@ -346,14 +395,39 @@ uchar usbFunctionDescriptor(usbRequest_t *rq) {
     }
     break;
   case USBDESCR_DEVICE:
-    usbMsgPtr = (uchar *)usbDescriptorDevice;
-    return usbDescriptorDevice[0];
-  case USB_BOS_DESCRIPTOR_TYPE:
-    usbMsgPtr = (uchar *)(BOS_DESCRIPTOR);
-    return sizeof(BOS_DESCRIPTOR);
-  default:
+    usbMsgPtr = (uchar *)_usbDescriptorDevice;
+    return _usbDescriptorDevice[0];
+  case USBDESCR_CONFIG:
+  
     usbMsgPtr = (uchar *)configDescrCDC;
     return sizeof(configDescrCDC);
+
+  case WL_REQUEST_WEBUSB: {
+    pmResponseIsEEPROM = true;
+    switch (rq->wIndex.word) {
+    case WEBUSB_REQUEST_GET_ALLOWED_ORIGINS:
+      GetDescriptorStart(0, &pmResponsePtr, &pmResponseBytesRemaining);
+      return USB_NO_MSG;
+    case WEBUSB_REQUEST_GET_URL:
+      if (GetDescriptorStart(rq->wValue.word, &pmResponsePtr,
+                             &pmResponseBytesRemaining)) {
+        return USB_NO_MSG;
+      }
+    }
+    break;
+  }
+  case WL_REQUEST_WINUSB: {
+    switch (rq->wIndex.word) {
+    case WINUSB_REQUEST_DESCRIPTOR:
+      pmResponsePtr = MS_OS_20_DESCRIPTOR_SET;
+      pmResponseBytesRemaining = sizeof(MS_OS_20_DESCRIPTOR_SET);
+      return USB_NO_MSG;
+    }
+    break;
+  }
+  default:
+
+    return 0;
   }
 }
 
@@ -385,8 +459,17 @@ uchar usbFunctionSetup(uchar data[8]) {
       sendEmptyFrame = 1;
   }
   switch (rq->bRequest) {
-
+  case WL_REQUEST_WINUSB:
+  _deb = 'W';
+    switch (rq->wIndex.word) {
+    case WINUSB_REQUEST_DESCRIPTOR:
+      pmResponsePtr = MS_OS_20_DESCRIPTOR_SET;
+      pmResponseBytesRemaining = sizeof(MS_OS_20_DESCRIPTOR_SET);
+      return USB_NO_MSG;
+    }
+    break;
   case WL_REQUEST_WEBUSB:
+   _deb = 'U';
     pmResponseIsEEPROM = true;
     switch (rq->wIndex.word) {
 
@@ -399,55 +482,15 @@ uchar usbFunctionSetup(uchar data[8]) {
         return USB_NO_MSG;
       }
       break;
-    case WL_REQUEST_WINUSB:
-      switch (rq->wIndex.word) {
-      case WINUSB_REQUEST_DESCRIPTOR:
-        pmResponsePtr = MS_OS_20_DESCRIPTOR_SET;
-        pmResponseBytesRemaining = sizeof(MS_OS_20_DESCRIPTOR_SET);
-        return USB_NO_MSG;
-      }
-      break;
     }
   }
-#if 0 
-  switch (rq->bRequest) {
-  
-  case WL_REQUEST_WEBUSB:
-  break;
-  
-    switch (rq->wIndex.word) {
-      
-    case WEBUSB_REQUEST_GET_ALLOWED_ORIGINS:
-      GetDescriptorStart(0, &pmResponsePtr, &pmResponseBytesRemaining);
-      return USB_NO_MSG;
-      
-    case WEBUSB_REQUEST_GET_URL:
-      if (GetDescriptorStart(rq->wValue.word, &pmResponsePtr,
-                             &pmResponseBytesRemaining)) {
-        return USB_NO_MSG;
-      }
-      break;
-      
-    case WL_REQUEST_WINUSB: {
-      switch (rq->wIndex.word) {
-      case WINUSB_REQUEST_DESCRIPTOR:
-        pmResponsePtr = MS_OS_20_DESCRIPTOR_SET;
-        pmResponseBytesRemaining = sizeof(MS_OS_20_DESCRIPTOR_SET);
-        return USB_NO_MSG;
-      }
-      break;
-
-      return 0;
-    }
-    
-    }
-#endif
 }
 /*---------------------------------------------------------------------------*/
 /* usbFunctionRead */
 /*---------------------------------------------------------------------------*/
 uchar usbFunctionRead(uchar *data, uchar len) {
- if (len > pmResponseBytesRemaining) {
+  
+  if (len > pmResponseBytesRemaining) {
     len = pmResponseBytesRemaining;
   }
   if (pmResponseIsEEPROM) {
@@ -458,7 +501,6 @@ uchar usbFunctionRead(uchar *data, uchar len) {
   pmResponsePtr += len;
   pmResponseBytesRemaining -= len;
   return len;
-
 }
 
 /*---------------------------------------------------------------------------*/

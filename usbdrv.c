@@ -315,7 +315,9 @@ uchar       flags = USB_FLG_MSGPTR_IS_ROM;
 
     SWITCH_START(rq->wValue.bytes[1])
     SWITCH_CASE(USBDESCR_DEVICE)    /* 1 */
-        GET_DESCRIPTOR(USB_CFG_DESCR_PROPS_DEVICE, usbDescriptorDevice)
+        //GET_DESCRIPTOR(USB_CFG_DESCR_PROPS_DEVICE, usbDescriptorDevice)
+len = usbFunctionDescriptor(rq);
+
     SWITCH_CASE(USBDESCR_CONFIG)    /* 2 */
         GET_DESCRIPTOR(USB_CFG_DESCR_PROPS_CONFIGURATION, usbDescriptorConfiguration)
     SWITCH_CASE(USBDESCR_STRING)    /* 3 */
@@ -332,7 +334,12 @@ uchar       flags = USB_FLG_MSGPTR_IS_ROM;
         SWITCH_CASE(2)
             GET_DESCRIPTOR(USB_CFG_DESCR_PROPS_STRING_PRODUCT, usbDescriptorStringDevice)
         SWITCH_CASE(3)
-            GET_DESCRIPTOR(USB_CFG_DESCR_PROPS_STRING_SERIAL_NUMBER, usbDescriptorStringSerialNumber)
+            //GET_DESCRIPTOR(USB_CFG_DESCR_PROPS_STRING_SERIAL_NUMBER, usbDescriptorStringSerialNumber)
+		len = usbFunctionDescriptor(rq);
+	SWITCH_CASE(15)
+            //GET_DESCRIPTOR(USB_CFG_DESCR_PROPS_STRING_SERIAL_NUMBER, usbDescriptorStringSerialNumber)
+                len = usbFunctionDescriptor(rq);
+
         SWITCH_DEFAULT
             if(USB_CFG_DESCR_PROPS_UNKNOWN & USB_PROP_IS_DYNAMIC){
                 len = usbFunctionDescriptor(rq);
@@ -346,9 +353,9 @@ uchar       flags = USB_FLG_MSGPTR_IS_ROM;
         GET_DESCRIPTOR(USB_CFG_DESCR_PROPS_HID_REPORT, usbDescriptorHidReport)
 #endif
     SWITCH_DEFAULT
-        if(USB_CFG_DESCR_PROPS_UNKNOWN & USB_PROP_IS_DYNAMIC){
+        //if(USB_CFG_DESCR_PROPS_UNKNOWN & USB_PROP_IS_DYNAMIC){
             len = usbFunctionDescriptor(rq);
-        }
+        //}
     SWITCH_END
     usbMsgFlags = flags;
     return len;

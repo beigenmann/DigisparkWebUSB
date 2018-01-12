@@ -78,6 +78,7 @@ public:
   void refresh();
   void task();
   void delay(long milli);
+  uchar deb();
   virtual int available(void);
   virtual int peek(void);
   virtual int read(void);
