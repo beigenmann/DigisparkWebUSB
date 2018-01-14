@@ -28,7 +28,7 @@ uint8_t landingPage;
 uint8_t pluggedInterface;
 const uint8_t *allowedOrigins;
 uchar pmResponseIsEEPROM;
-uchar _deb = 0;
+extern uchar _deb ;
 
 #ifdef __cplusplus
 } // extern "C"
@@ -424,11 +424,9 @@ uchar usbFunctionSetup(uchar data[8]) {
 
     switch (rq->wIndex.word) {
     case WEBUSB_REQUEST_GET_ALLOWED_ORIGINS:
-     _deb = 2;
       GetDescriptorStart(0, &pmResponsePtr, &pmResponseBytesRemaining);
       return USB_NO_MSG;
     case WEBUSB_REQUEST_GET_URL:
-    _deb = 3;
       if (GetDescriptorStart(rq->wValue.word, &pmResponsePtr,
                              &pmResponseBytesRemaining)) {
         return USB_NO_MSG;
@@ -436,10 +434,8 @@ uchar usbFunctionSetup(uchar data[8]) {
     }
     break;
   case WL_REQUEST_WINUSB:
-  _deb = 10;
     switch (rq->wIndex.word) {
     case WINUSB_REQUEST_DESCRIPTOR:
-  _deb = 11;
       pmResponsePtr = MS_OS_20_DESCRIPTOR_SET;
       pmResponseBytesRemaining = sizeof(MS_OS_20_DESCRIPTOR_SET);
       return USB_NO_MSG;
@@ -493,6 +489,7 @@ uchar usbFunctionWrite(uchar *data, uchar len) {
 
  
   if (currentRequest == WL_REQUEST_SET_WEBUSB_URLS) {
+    _deb = 56;
     eeprom_update_block(data,
                         (void*)(EEPROM_WEBUSB_URLS_START + currentPosition),
                         len);
@@ -502,6 +499,7 @@ uchar usbFunctionWrite(uchar *data, uchar len) {
   }
 
   if (currentRequest == WL_REQUEST_SET_SERIAL_NUMBER) {
+    _deb = 58;
     eeprom_update_block(data,
                         (void*)(EEPROM_SERIAL_START + currentPosition),
                         len);
