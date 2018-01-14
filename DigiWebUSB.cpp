@@ -409,19 +409,26 @@ uchar usbFunctionDescriptor(usbRequest_t *rq) {
 /* ------------------------------------------------------------------------- */
 /* ----------------------------- USB interface ----------------------------- */
 /* ------------------------------------------------------------------------- */
-
+static uint16_t currentValue, currentIndex;
+static uchar currentPosition, bytesRemaining;
+uchar currentRequest;
+static uchar buffer[64];
 uchar usbFunctionSetup(uchar data[8]) {
   usbRequest_t *rq = (usbRequest_t *)((void *)data);
-
+  currentRequest = rq->bRequest;
+  currentValue = rq->wValue.word;
+  currentIndex = rq->wIndex.word;
   switch (rq->bRequest) {
   case WL_REQUEST_WEBUSB:
     pmResponseIsEEPROM = true;
-    
+
     switch (rq->wIndex.word) {
     case WEBUSB_REQUEST_GET_ALLOWED_ORIGINS:
+     _deb = 2;
       GetDescriptorStart(0, &pmResponsePtr, &pmResponseBytesRemaining);
       return USB_NO_MSG;
     case WEBUSB_REQUEST_GET_URL:
+    _deb = 3;
       if (GetDescriptorStart(rq->wValue.word, &pmResponsePtr,
                              &pmResponseBytesRemaining)) {
         return USB_NO_MSG;
@@ -429,10 +436,10 @@ uchar usbFunctionSetup(uchar data[8]) {
     }
     break;
   case WL_REQUEST_WINUSB:
-
+  _deb = 10;
     switch (rq->wIndex.word) {
     case WINUSB_REQUEST_DESCRIPTOR:
-
+  _deb = 11;
       pmResponsePtr = MS_OS_20_DESCRIPTOR_SET;
       pmResponseBytesRemaining = sizeof(MS_OS_20_DESCRIPTOR_SET);
       return USB_NO_MSG;
@@ -443,7 +450,7 @@ uchar usbFunctionSetup(uchar data[8]) {
       USBRQ_TYPE_CLASS) { /* class request type */
 
     if (rq->bRequest == GET_LINE_CODING || rq->bRequest == SET_LINE_CODING) {
-      return 0xff;
+    //  return 0xff;
       /*    GET_LINE_CODING -> usbFunctionRead()    */
       /*    SET_LINE_CODING -> usbFunctionWrite()    */
     }
@@ -464,7 +471,7 @@ uchar usbFunctionSetup(uchar data[8]) {
 /* usbFunctionRead */
 /*---------------------------------------------------------------------------*/
 uchar usbFunctionRead(uchar *data, uchar len) {
-_deb = 23;
+
   if (len > pmResponseBytesRemaining) {
     len = pmResponseBytesRemaining;
   }
@@ -482,10 +489,38 @@ _deb = 23;
 /* usbFunctionWrite */
 /*---------------------------------------------------------------------------*/
 uchar usbFunctionWrite(uchar *data, uchar len) {
-  // baud.bytes[0] = data[0];
-  // baud.bytes[1] = data[1];
+  uchar i;
 
-  return 1;
+ 
+  if (currentRequest == WL_REQUEST_SET_WEBUSB_URLS) {
+    eeprom_update_block(data,
+                        (void*)(EEPROM_WEBUSB_URLS_START + currentPosition),
+                        len);
+    currentPosition += len;
+    bytesRemaining -= len;
+    return bytesRemaining == 0;
+  }
+
+  if (currentRequest == WL_REQUEST_SET_SERIAL_NUMBER) {
+    eeprom_update_block(data,
+                        (void*)(EEPROM_SERIAL_START + currentPosition),
+                        len);
+    currentPosition += len;
+    bytesRemaining -= len;
+    return bytesRemaining == 0;
+  }
+
+  if (len > bytesRemaining) {
+    len = bytesRemaining;
+  }
+  bytesRemaining -= len;
+  for (i = 0; i < len; i++) {
+    buffer[currentPosition++] = data[i];
+  }
+
+  
+
+  return bytesRemaining == 0;             // return 1 if we have all data
 }
 
 void usbFunctionWriteOut(uchar *data, uchar len) {
