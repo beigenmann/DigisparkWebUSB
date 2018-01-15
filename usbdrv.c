@@ -334,8 +334,8 @@ len = usbFunctionDescriptor(rq);
         SWITCH_CASE(2)
             GET_DESCRIPTOR(USB_CFG_DESCR_PROPS_STRING_PRODUCT, usbDescriptorStringDevice)
         SWITCH_CASE(3)
-            //GET_DESCRIPTOR(USB_CFG_DESCR_PROPS_STRING_SERIAL_NUMBER, usbDescriptorStringSerialNumber)
-		len = usbFunctionDescriptor(rq);
+            GET_DESCRIPTOR(USB_CFG_DESCR_PROPS_STRING_SERIAL_NUMBER, usbDescriptorStringSerialNumber)
+	//	len = usbFunctionDescriptor(rq);
 	SWITCH_CASE(15)
             //GET_DESCRIPTOR(USB_CFG_DESCR_PROPS_STRING_SERIAL_NUMBER, usbDescriptorStringSerialNumber)
                 len = usbFunctionDescriptor(rq);

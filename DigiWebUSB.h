@@ -18,6 +18,9 @@ and Digistump LLC (digistump.com)
 #define HW_CDC_BULK_OUT_SIZE 8
 #define HW_CDC_BULK_IN_SIZE 8
 #define USB_BOS_DESCRIPTOR_TYPE 15
+#define WL_REQUEST_WINUSB    (252)
+#define WL_REQUEST_WEBUSB    (254)
+
 #define WEBUSB_REQUEST_GET_ALLOWED_ORIGINS 0x01
 #define WEBUSB_REQUEST_GET_URL 0x02
 #define REQUEST_TYPE                  0x60
