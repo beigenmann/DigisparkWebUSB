@@ -23,7 +23,8 @@ uint8_t numUrls;
 uint8_t landingPage;
 uint8_t pluggedInterface;
 const uint8_t *allowedOrigins;
-extern uchar _deb;
+uint8_t numAllowedOrigins;
+extern const char *_deb;
 static uchar buffer[64];
 #define USB_BOS_DESCRIPTOR_TYPE (15)
 #define MS_OS_20_DESCRIPTOR_LENGTH (0x1e)
@@ -103,12 +104,16 @@ const uint8_t MS_OS_20_DESCRIPTOR_SUFFIX[] PROGMEM = {
 uchar sendEmptyFrame;
 static uchar intr3Status; /* used to control interrupt endpoint transmissions */
 
-DigiWebUSBDevice::DigiWebUSBDevice(const WebUSBURL *urls, uint8_t numUrls,
+DigiWebUSBDevice::DigiWebUSBDevice(const WebUSBURL *_urls, uint8_t _numUrls,
                                    uint8_t _landingPage,
-                                   const uint8_t *allowedOrigins,
-                                   uint8_t numAllowedOrigins) {
-  landingPage = 0;
+                                   const uint8_t *_allowedOrigins,
+                                   uint8_t _numAllowedOrigins) {
+  landingPage = _landingPage;
   pluggedInterface = 0;
+  allowedOrigins = _allowedOrigins;
+  numAllowedOrigins = _numAllowedOrigins;
+  urls = _urls;
+  numUrls = _numUrls;
 }
 
 void DigiWebUSBDevice::delay(long milli) {
@@ -206,7 +211,7 @@ void DigiWebUSBDevice::usbBegin() {
 
   sei();
 }
-uchar DigiWebUSBDevice::deb() { return _deb; }
+const char* DigiWebUSBDevice::deb() { return _deb; }
 
 void DigiWebUSBDevice::usbPollWrapper() {
   usbPoll();
@@ -413,44 +418,27 @@ const char _usbDescriptorDevice[] PROGMEM = {
 };
 
 uchar usbFunctionDescriptor(usbRequest_t *rq) {
+  pmResponseBytesRemaining = 0;
   switch (rq->wValue.bytes[1]) {
 
   case USB_BOS_DESCRIPTOR_TYPE: {
-    landingPage = 1;
 
     int length = sizeof(BOS_DESCRIPTOR_PREFIX);
     memcpy_P(buffer, &BOS_DESCRIPTOR_PREFIX, length);
     memcpy(&buffer[length], &landingPage, 1);
-
     length++;
     memcpy_P(&buffer[length], &BOS_DESCRIPTOR_SUFFIX,
              sizeof(BOS_DESCRIPTOR_SUFFIX));
-
     length += sizeof(BOS_DESCRIPTOR_SUFFIX);
-
     pmResponsePtr = buffer;
     pmResponseBytesRemaining = length;
     usbMsgPtr = (uchar *)(NULL);
     return USB_NO_MSG;
   }
-  case USBDESCR_STRING:
-    switch (rq->wValue.bytes[0]) {
-    case 3:
-      buffer[0] = 2;
-      buffer[1] = 'A';
-      buffer[2] = 'B';
-     // memcpy_P(&buffer[1], &SerialNR, sizeof(SerialNR));
-      pmResponsePtr = buffer;
-      pmResponseBytesRemaining = 3;
-      usbMsgPtr = (uchar *)NULL;
-      return USB_NO_MSG;
-    }
-    break;
   case USBDESCR_DEVICE:
     usbMsgPtr = (uchar *)_usbDescriptorDevice;
     return _usbDescriptorDevice[0];
   case USBDESCR_CONFIG:
-
     usbMsgPtr = (uchar *)configDescrCDC;
     return sizeof(configDescrCDC);
   }
@@ -465,22 +453,49 @@ uchar usbFunctionDescriptor(usbRequest_t *rq) {
 static uint16_t currentValue, currentIndex;
 static uchar currentPosition, bytesRemaining;
 uchar currentRequest;
-
+const char wa[] = "WEBUSB_REQUEST_GET_ALLOWED_ORIGINS";
+const char wu[] = "WEBUSB_REQUEST_GET_URL";
 uchar usbFunctionSetup(uchar data[8]) {
   usbRequest_t *rq = (usbRequest_t *)((void *)data);
   currentRequest = rq->bRequest;
   currentValue = rq->wValue.word;
   currentIndex = rq->wIndex.word;
+  pmResponseBytesRemaining = 0;
   switch (rq->bRequest) {
   case WL_REQUEST_WEBUSB:
 
     switch (rq->wIndex.word) {
     case WEBUSB_REQUEST_GET_ALLOWED_ORIGINS:
-      //  GetDescriptorStart(0, &pmResponsePtr, &pmResponseBytesRemaining);
+      buffer[0] = 0x05;
+      buffer[1] = 0x00;
+      buffer[2] = 0x0c;
+      buffer[3] = numAllowedOrigins;
+      buffer[4] = 0x00;
+      buffer[5] = 0x01;
+      buffer[6] = 0x04;
+      buffer[7] = 0x01;
+      buffer[8] = 0x01;
+      buffer[9] = 0x01;
+      buffer[10] = 0x03;
+      buffer[11] = numAllowedOrigins;
+      buffer[12] = 0x02;
+      buffer[13] = pluggedInterface;
+      pmResponsePtr = buffer;
+      pmResponseBytesRemaining = 14;
       return USB_NO_MSG;
     case WEBUSB_REQUEST_GET_URL:
-      // if (GetDescriptorStart(rq->wValue.word, &pmResponsePtr,
-      //                        &pmResponseBytesRemaining)) {
+      const WebUSBURL &url = urls[rq->wValue.bytes[0] - 1];
+      uint8_t urlLength = strlen(url.url);
+      uint8_t descriptorLength = urlLength + 3;
+      buffer[0] = descriptorLength;
+      uint8_t descriptorType = 3;
+      buffer[1] = descriptorType;
+      buffer[2] = url.scheme;
+      _deb = url.url;
+      memcpy(&buffer[3], url.url, urlLength);
+      pmResponsePtr = buffer;
+      pmResponseBytesRemaining = descriptorLength;
+      usbMsgPtr = (uchar *)(NULL);
       return USB_NO_MSG;
       //}
     }
@@ -488,8 +503,17 @@ uchar usbFunctionSetup(uchar data[8]) {
   case WL_REQUEST_WINUSB:
     switch (rq->wIndex.word) {
     case WINUSB_REQUEST_DESCRIPTOR:
-      usbMsgPtr = (uchar *)MS_OS_20_DESCRIPTOR_SET;
-      return sizeof(MS_OS_20_DESCRIPTOR_SET);
+      int length = sizeof(MS_OS_20_DESCRIPTOR_PREFIX);
+      memcpy_P(buffer, &MS_OS_20_DESCRIPTOR_PREFIX, length);
+      memcpy(&buffer[length], &pluggedInterface, 1);
+      length++;
+      memcpy_P(&buffer[length], &MS_OS_20_DESCRIPTOR_SUFFIX,
+               sizeof(MS_OS_20_DESCRIPTOR_SUFFIX));
+      length += sizeof(MS_OS_20_DESCRIPTOR_SUFFIX);
+      pmResponsePtr = buffer;
+      pmResponseBytesRemaining = length;
+      usbMsgPtr = (uchar *)(NULL);
+      return USB_NO_MSG;
     }
     break;
   }
@@ -518,6 +542,7 @@ uchar usbFunctionSetup(uchar data[8]) {
 /* usbFunctionRead                                                          */
 /*---------------------------------------------------------------------------*/
 uchar usbFunctionRead(uchar *data, uchar len) {
+  _deb = "EDN";
   if (len > pmResponseBytesRemaining) {
     len = pmResponseBytesRemaining;
   }

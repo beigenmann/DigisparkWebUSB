@@ -11,7 +11,7 @@
 #include "usbportability.h"
 #include "usbdrv.h"
 #include "oddebug.h"
-uchar _deb = 0;
+const char* _deb = 0;
 /*
 General Description:
 This module implements the C-part of the USB driver. See usbdrv.h for a
